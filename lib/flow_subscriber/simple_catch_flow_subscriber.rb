@@ -1,6 +1,6 @@
 module Flows
   class SimpleCatchFlowSubscriber < SimpleFlowSubscriber
-    # Sobrescreve run para adicionar try/catch ao redor do execute
+    # Overrides run to add try/catch around execute
     def run(flow_context)
       self.execute(flow_context)
     rescue Exception => e
@@ -8,12 +8,12 @@ module Flows
       self.catch(e, flow_context)
     end
 
-    # Método que o desenvolvedor deve implementar (herdado, mas reforçando)
+    # Method that the developer must implement
     def execute(flow_context)
       raise NotImplementedError, "#{self.class} must implement the execute method"
     end
 
-    # Método chamado quando ocorre uma exceção
+    # Method called when an exception occurs
     def catch(exception, flow_context)
       raise NotImplementedError, "#{self.class} must implement the catch method"
     end

@@ -7,12 +7,12 @@ module Flows
       @flow_context = flow_context
     end
 
-    # Método chamado pelo controller - não sobrescrever
+    # Method called by the controller - DO NOT override
     def run(flow_context)
       execute(flow_context)
     end
 
-    # Método que o desenvolvedor deve implementar
+    # Method that the developer must implement
     def execute(flow_context)
       raise NotImplementedError, "#{self.class} must implement the execute method"
     end
