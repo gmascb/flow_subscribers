@@ -1,5 +1,6 @@
+# frozen_string_literal: true
+
 require "flow_subscribers/version"
-require 'byebug'
 
 module Flows
   class CompleteFlowController
@@ -17,54 +18,58 @@ module Flows
     end
 
     def execute_flows
+      # Phase 1: can_execute? - Check all flows first
+      executable_flows = []
       @flows.each do |flow|
-        flow.flow_context["#{flow.to_s}_can_execute?".to_sym] = flow.can_execute?(flow.flow_context)
+        puts "Checking can_execute? #{flow.to_s}"
+        can_execute = flow.can_execute?(@flow_context)
+        @flow_context["#{flow.to_s}_can_execute?".to_sym] = can_execute
+        executable_flows << flow if can_execute
       end
 
-      @flows.each do |flow|
-        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
-          begin
-            flow.valid?(flow.flow_context)
-          rescue Exception => e
-            flow.flow_context["#{flow.to_s}_validation_error_message".to_sym] = e.message
-            raise CompleteFlowValidationException(e.message)
-          end
+      # Phase 2: valid? - Validate all executable flows
+      # If any validation fails, stop execution before save
+      executable_flows.each do |flow|
+        puts "Validating #{flow.to_s}"
+        begin
+          flow.valid?(@flow_context)
+        rescue Exception => e
+          @flow_context["#{flow.to_s}_validation_error".to_sym] = e.message
+          raise e
         end
       end
 
-      # prepare the flows
-      @flows.each do |flow|
-        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
-          puts "Executing prepare #{flow.to_s}"
-          flow.prepare(flow.flow_context)
-        end
+      # Phase 3: prepare - Prepare all executable flows
+      executable_flows.each do |flow|
+        puts "Preparing #{flow.to_s}"
+        flow.prepare(@flow_context)
       end
 
-      # save the flows
-      @flows.each do |flow|
-        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
-          puts "Executing save #{flow.to_s}"
-          flow.save(flow.flow_context)
-        end
+      # Phase 4: save - Save all executable flows
+      # Only executed if all validations and preparations passed
+      executable_flows.each do |flow|
+        puts "Saving #{flow.to_s}"
+        flow.save(@flow_context)
       end
 
-      # dispose the flows
-      @flows.each do |flow|
-        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
-          puts "Executing dispose #{flow.to_s}"
-          flow.dispose(flow.flow_context)
-        end
+      # Phase 5: dispose - Cleanup all executable flows
+      executable_flows.each do |flow|
+        puts "Disposing #{flow.to_s}"
+        flow.dispose(@flow_context)
       end
 
       @flow_context
     end
 
     def validate_flows!
-      if !@flows.is_a? Array || @flows.empty?
-        @flows.each do |flow|
-          raise "Flows must be an array of CompleteFlowSubscribers" unless flow.is_a?(CompleteFlowSubscriber)
+      raise "Flows must be an array" unless @flows.is_a?(Array)
+      @flows.each do |flow|
+        unless flow.is_a?(CompleteFlowSubscriber)
+          raise "All flows must be CompleteFlowSubscriber instances"
         end
       end
     end
   end
+
+  class CompleteFlowValidationException < StandardError; end
 end

@@ -16,15 +16,18 @@ This is a Ruby gem that implements a **Flow Pattern** for organizing backend cod
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     FlowSubscriber                              │
-│  - Each subscriber has a single responsibility (SRP)            │
+│  - Each subscriber has a single responsibility (SRP)           │
 │  - Developer implements only the `execute(flow_context)` method │
 │  - The run() method is internal and should NOT be overridden    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Main Components Flow Subscribers
+---
 
-### 1. SimpleFlowSubscriber
+# Simple Flow (Recommended for most cases)
+
+## SimpleFlowSubscriber
+
 Base class for flow subscribers. Developer must implement only `execute(flow_context)`.
 
 ```ruby
@@ -35,115 +38,293 @@ class MyFlowSubscriber < Flows::SimpleFlowSubscriber
 end
 ```
 
-### 2. SimpleCatchFlowSubscriber
+## SimpleCatchFlowSubscriber
+
 Flow with automatic exception handling. Developer implements `execute` and `catch`.
 
 ```ruby
 class MyFlowWithErrorHandling < Flows::SimpleCatchFlowSubscriber
   def execute(flow_context)
     # Your business logic goes here that might raise an exception
+    result = external_api_call()
+    flow_context[:api_result] = result
   end
 
   def catch(exception, flow_context)
     # Handle the exception
+    flow_context[:error] = exception.message
+    flow_context[:success] = false
   end
 end
 ```
 
-### 3. SimpleFlowController
+## SimpleFlowController
+
 Orchestrates the execution of multiple flows in sequence.
 
-#### Usage SimpleFlowController
+**Execution Order:**
+```
+Flow1.execute → Flow2.execute → Flow3.execute → ... → FlowN.execute
+```
+
+### Example: Simple Flow Usage
 
 ```ruby
-class MySampleFlowController < Flows::SimpleFlowController
+# Controller
+class CreateAccountController < Flows::SimpleFlowController
   def initialize(flow_context: {})
     super([
       ValidateInputFlowSubscriber.new,
-      SaveResultFlowSubscriber.new
+      CreateAccountFlowSubscriber.new,
+      SendWelcomeEmailFlowSubscriber.new
     ], flow_context)
   end
 end
 
-class ValidateInputFlowSubscriber < SimpleFlowSubscriber
-  def execute
-    # Business logic goes here
+# Subscribers
+class ValidateInputFlowSubscriber < Flows::SimpleFlowSubscriber
+  def execute(flow_context)
+    raise "Email is required" unless flow_context[:email]
+    raise "Name is required" unless flow_context[:name]
   end
 end
 
-class SaveResultFlowSubscriber < SimpleCatchFlowSubscriber
-  def execute
-    # Business logic goes here...
+class CreateAccountFlowSubscriber < Flows::SimpleCatchFlowSubscriber
+  def execute(flow_context)
+    account = Account.create!(
+      email: flow_context[:email],
+      name: flow_context[:name]
+    )
+    flow_context[:account] = account
   end
 
-  def catch
-    # OOPS... an exception was thrown in your execute method?
-    # Now you'll catch it here...
+  def catch(exception, flow_context)
+    flow_context[:error] = exception.message
+    flow_context[:success] = false
   end
 end
 
-# Some other class
-result = MySampleFlowController.new(params).execute
+class SendWelcomeEmailFlowSubscriber < Flows::SimpleFlowSubscriber
+  def execute(flow_context)
+    return if flow_context[:error]  # Skip if previous flow failed
+    AccountMailer.welcome(flow_context[:account]).deliver_later
+    flow_context[:email_sent] = true
+  end
+end
+
+# Usage
+result = CreateAccountController.new(flow_context: { email: "john.doe@example.com", name: "John Doe" }).execute
 ```
 
-# Usage of CompleteFlowController
+---
+
+# Complete Flow (For complex business logic)
+
+## CompleteFlowSubscriber
+
+Advanced flow with multiple lifecycle methods for complex business logic.
+
 ```ruby
-class MyCompleteFlowController < Flows::CompleteFlowController
+class MyCompleteFlow < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    # Return true/false to determine if this flow should run
+    flow_context[:user].present?
+  end
+
+  def valid?(flow_context)
+    # Validate data - raise exception if invalid
+    raise "Invalid email" unless flow_context[:email].include?("@")
+  end
+
+  def prepare(flow_context)
+    # Prepare data, calculations, transformations
+    flow_context[:prepared_data] = transform(flow_context[:raw_data])
+  end
+
+  def save(flow_context)
+    # Persist data, HTTP requests, database operations
+    Record.create!(flow_context[:prepared_data])
+  end
+
+  def dispose(flow_context)
+    # Cleanup, close connections, send notifications, queue messages
+    NotificationService.notify(flow_context[:user])
+  end
+end
+```
+
+## CompleteFlowController
+
+Orchestrates multiple CompleteFlowSubscribers with **phase-based execution**.
+
+### Execution Order (IMPORTANT!)
+
+The controller executes **each phase for ALL flows** before moving to the next phase:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Phase 1: can_execute?                                              │
+│  Flow1.can_execute? → Flow2.can_execute? → Flow3.can_execute?       │
+├─────────────────────────────────────────────────────────────────────┤
+│  Phase 2: valid?                                                    │
+│  Flow1.valid? → Flow2.valid? → Flow3.valid?                         │
+│  ⚠️ If any validation fails, execution STOPS before save!          │
+├─────────────────────────────────────────────────────────────────────┤
+│  Phase 3: prepare                                                   │
+│  Flow1.prepare → Flow2.prepare → Flow3.prepare                      │
+├─────────────────────────────────────────────────────────────────────┤
+│  Phase 4: save                                                      │
+│  Flow1.save → Flow2.save → Flow3.save                               │
+│  ✅ Only executed if ALL validations passed!                        │
+├─────────────────────────────────────────────────────────────────────┤
+│  Phase 5: dispose                                                   │
+│  Flow1.dispose → Flow2.dispose → Flow3.dispose                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Phase-Based Execution?
+
+This ensures **data consistency**:
+- If Flow3 validation fails, Flow1 and Flow2 saves are NOT executed
+- All validations pass before any data is persisted
+- Rollback is not needed because nothing was saved yet
+
+### Example: Complete Flow Usage
+
+```ruby
+# Controller
+class ProcessPaymentController < Flows::CompleteFlowController
   def initialize(flow_context: {})
     super([
-      ValidateInputFlowSubscriber.new,
-      SaveResultFlowSubscriber.new
+      ValidatePaymentFlowSubscriber.new,
+      CheckBalanceFlowSubscriber.new,
+      ProcessTransactionFlowSubscriber.new,
+      SendReceiptFlowSubscriber.new
     ], flow_context)
   end
 end
 
-class ValidateInputFlowSubsciber < CompleteFlowSubscriber
-OR
-class SaveResultFlowSubscriber < CompleteFlowSubscriber
-
-  def can_execute?
-    # Must return a boolean
-    # The return of this method will be validated to procceed and execute the other methods of the complete flow.
-    # If you don't return a boolean, the flow will continue and the other methods will be executed;
+# Subscribers
+class ValidatePaymentFlowSubscriber < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    flow_context[:amount].present?
   end
 
-  def valid?
-    # Must return a boolean
-    # Do your validations and raise an exception if something is not valid;
-    # If you don't raise an exception, the flow will continue and the other methods will be executed;
+  def valid?(flow_context)
+    raise "Amount must be positive" if flow_context[:amount] <= 0
+    raise "Invalid card" unless flow_context[:card].valid?
   end
 
-  def prepare
-    # Prepare your data, objects, calculations, etc;
-    # void method
+  def prepare(flow_context)
+    flow_context[:payment_data] = {
+      amount: flow_context[:amount],
+      card_token: flow_context[:card].tokenize
+    }
   end
 
-  def save
-    # Save your data, objects, do http requests, etc;
-    # void method
+  def save(flow_context)
+    # Nothing to save in this flow
   end
 
-  def dispose
-    # Dispose your data, objects, calculations, close connections, send emails, add message to a queue, etc;
-    # void method
+  def dispose(flow_context)
+    # Nothing to dispose
   end
 end
 
-result = MyCompleteFlowController.new(params).execute
+class CheckBalanceFlowSubscriber < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    true
+  end
+
+  def valid?(flow_context)
+    balance = BankService.check_balance(flow_context[:card])
+    raise "Insufficient funds" if balance < flow_context[:amount]
+    flow_context[:balance] = balance
+  end
+
+  def prepare(flow_context)
+    flow_context[:new_balance] = flow_context[:balance] - flow_context[:amount]
+  end
+
+  def save(flow_context)
+    # Nothing to save yet
+  end
+
+  def dispose(flow_context)
+    # Nothing to dispose
+  end
+end
+
+class ProcessTransactionFlowSubscriber < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    true
+  end
+
+  def valid?(flow_context)
+    # Already validated in previous flows
+  end
+
+  def prepare(flow_context)
+    flow_context[:transaction] = Transaction.new(flow_context[:payment_data])
+  end
+
+  def save(flow_context)
+    # This only runs if ALL validations passed!
+    flow_context[:transaction].save!
+    flow_context[:transaction_id] = flow_context[:transaction].id
+  end
+
+  def dispose(flow_context)
+    # Nothing to dispose
+  end
+end
+
+class SendReceiptFlowSubscriber < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    flow_context[:transaction_id].present?
+  end
+
+  def valid?(flow_context)
+    # No validation needed
+  end
+
+  def prepare(flow_context)
+    # Nothing to prepare
+  end
+
+  def save(flow_context)
+    # Nothing to save
+  end
+
+  def dispose(flow_context)
+    # Send receipt email after everything is done
+    ReceiptMailer.send(flow_context[:transaction_id]).deliver_later
+  end
+end
+
+# Usage
+result = ProcessPaymentController.new(
+  flow_context: { amount: 100.00, card: card_object }
+).execute
 ```
+
+---
 
 ## SOLID Principles Applied
 
 - **S** (Single Responsibility): Each FlowSubscriber has ONE responsibility
 - **O** (Open/Closed): Extend by creating new subscribers, don't modify existing ones
 - **L** (Liskov Substitution): Any FlowSubscriber can be replaced by another
-- **I** (Interface Segregation): Simple interface - just implement `execute`
+- **I** (Interface Segregation): Simple interface - just implement required methods
 - **D** (Dependency Inversion): Dependencies injected via constructor
+
+---
 
 ## Code Rules
 
 1. **The execute method should be short** (~20 lines max)
-   - If it grows, split into multiple FlowSubscribers, each flow should have one responsibility;
+   - If it grows, split into multiple FlowSubscribers
+   - Each flow should have one responsibility
 
 2. **Each FlowSubscriber should have one responsibility**
    - Validation → ValidateInputFlowSubscriber
@@ -174,6 +355,8 @@ result = MyCompleteFlowController.new(params).execute
    end
    ```
 
+---
+
 ## File Structure
 
 ```
@@ -182,71 +365,49 @@ lib/
 ├── flow_subscribers/
 │   └── version.rb                   # Gem version
 ├── flow_subscriber/
-│   ├── simple_flow_subscriber.rb    # Base class
+│   ├── simple_flow_subscriber.rb    # Base class (simple)
 │   ├── simple_catch_flow_subscriber.rb  # With try/catch
 │   └── complete_flow_subscriber.rb  # Advanced version
 └── flow_controller/
     ├── simple_flow_controller.rb    # Simple controller
-    └── complete_flow_controller.rb  # Advanced controller
+    └── complete_flow_controller.rb  # Phase-based controller
 ```
+
+---
 
 ## Internal Methods (DO NOT Override)
 
 - `run(flow_context)` - Called by controller, handles internal logic
 - `validate_flows!` - Validates flow array
+- `execute_flows` - Orchestrates flow execution
+
+---
 
 ## Methods to Implement
 
-| Class | Method | Description |
-|-------|--------|-------------|
-| SimpleFlowSubscriber | `execute(flow_context)` | Main business logic |
-| SimpleCatchFlowSubscriber | `execute(flow_context)` | Main business logic |
-| SimpleCatchFlowSubscriber | `catch(exception, flow_context)` | Exception handler |
+### SimpleFlowSubscriber
+| Method | Description |
+|--------|-------------|
+| `execute(flow_context)` | Main business logic |
 
-## Example: Create Account Flow
+### SimpleCatchFlowSubscriber
+| Method | Description |
+|--------|-------------|
+| `execute(flow_context)` | Main business logic |
+| `catch(exception, flow_context)` | Exception handler |
 
-```ruby
-# Controller
-class CreateAccountController < Flows::SimpleFlowController
-  def initialize
-    super([
-      ValidateAccountFlowSubscriber.new,
-      CreateAccountFlowSubscriber.new,
-      SendWelcomeEmailFlowSubscriber.new
-    ], {})
-  end
-end
+### CompleteFlowSubscriber
+| Method | Description |
+|--------|-------------|
+| `can_execute?(flow_context)` | Return boolean to determine if flow should run |
+| `valid?(flow_context)` | Validate data, raise exception if invalid |
+| `prepare(flow_context)` | Prepare data, calculations, transformations |
+| `save(flow_context)` | Persist data, HTTP requests, database operations |
+| `dispose(flow_context)` | Cleanup, notifications, queue messages |
 
-# Subscribers
-class ValidateAccountFlowSubscriber < Flows::SimpleFlowSubscriber
-  def execute(flow_context)
-    raise "Email is required" unless flow_context[:email]
-  end
-end
-
-class CreateAccountFlowSubscriber < Flows::SimpleCatchFlowSubscriber
-  def execute(flow_context)
-    account = Account.create!(email: flow_context[:email])
-    flow_context[:account] = account
-  end
-
-  def catch(exception, flow_context)
-    flow_context[:error] = exception.message
-  end
-end
-
-class SendWelcomeEmailFlowSubscriber < Flows::SimpleFlowSubscriber
-  def execute(flow_context)
-    AccountMailer.welcome(flow_context[:account]).deliver_later
-  end
-end
-
-# Usage
-result = CreateAccountController.new.execute
-```
+---
 
 ## Language
 
 - All code comments should be in **English**
 - Variable and method names in **English**
-
