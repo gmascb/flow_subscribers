@@ -1,0 +1,252 @@
+# Flow Subscribers - Cursor Rules
+
+## Overview
+
+This is a Ruby gem that implements a **Flow Pattern** for organizing backend code following **SOLID principles**.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      FlowController                             │
+│  - Orchestrates the execution of multiple FlowSubscribers       │
+│  - Calls flow.run(context) for each subscriber in sequence      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     FlowSubscriber                              │
+│  - Each subscriber has a single responsibility (SRP)            │
+│  - Developer implements only the `execute(flow_context)` method │
+│  - The run() method is internal and should NOT be overridden    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Main Components Flow Subscribers
+
+### 1. SimpleFlowSubscriber
+Base class for flow subscribers. Developer must implement only `execute(flow_context)`.
+
+```ruby
+class MyFlowSubscriber < Flows::SimpleFlowSubscriber
+  def execute(flow_context)
+    # Your business logic goes here
+  end
+end
+```
+
+### 2. SimpleCatchFlowSubscriber
+Flow with automatic exception handling. Developer implements `execute` and `catch`.
+
+```ruby
+class MyFlowWithErrorHandling < Flows::SimpleCatchFlowSubscriber
+  def execute(flow_context)
+    # Your business logic goes here that might raise an exception
+  end
+
+  def catch(exception, flow_context)
+    # Handle the exception
+  end
+end
+```
+
+### 3. SimpleFlowController
+Orchestrates the execution of multiple flows in sequence.
+
+#### Usage SimpleFlowController
+
+```ruby
+class MySampleFlowController < Flows::SimpleFlowController
+  def initialize(flow_context: {})
+    super([
+      ValidateInputFlowSubscriber.new,
+      SaveResultFlowSubscriber.new
+    ], flow_context)
+  end
+end
+
+class ValidateInputFlowSubscriber < SimpleFlowSubscriber
+  def execute
+    # Business logic goes here
+  end
+end
+
+class SaveResultFlowSubscriber < SimpleCatchFlowSubscriber
+  def execute
+    # Business logic goes here...
+  end
+
+  def catch
+    # OOPS... an exception was thrown in your execute method?
+    # Now you'll catch it here...
+  end
+end
+
+# Some other class
+result = MySampleFlowController.new(params).execute
+```
+
+# Usage of CompleteFlowController
+```ruby
+class MyCompleteFlowController < Flows::CompleteFlowController
+  def initialize(flow_context: {})
+    super([
+      ValidateInputFlowSubscriber.new,
+      SaveResultFlowSubscriber.new
+    ], flow_context)
+  end
+end
+
+class ValidateInputFlowSubsciber < CompleteFlowSubscriber
+OR
+class SaveResultFlowSubscriber < CompleteFlowSubscriber
+
+  def can_execute?
+    # Must return a boolean
+    # The return of this method will be validated to procceed and execute the other methods of the complete flow.
+    # If you don't return a boolean, the flow will continue and the other methods will be executed;
+  end
+
+  def valid?
+    # Must return a boolean
+    # Do your validations and raise an exception if something is not valid;
+    # If you don't raise an exception, the flow will continue and the other methods will be executed;
+  end
+
+  def prepare
+    # Prepare your data, objects, calculations, etc;
+    # void method
+  end
+
+  def save
+    # Save your data, objects, do http requests, etc;
+    # void method
+  end
+
+  def dispose
+    # Dispose your data, objects, calculations, close connections, send emails, add message to a queue, etc;
+    # void method
+  end
+end
+
+result = MyCompleteFlowController.new(params).execute
+```
+
+## SOLID Principles Applied
+
+- **S** (Single Responsibility): Each FlowSubscriber has ONE responsibility
+- **O** (Open/Closed): Extend by creating new subscribers, don't modify existing ones
+- **L** (Liskov Substitution): Any FlowSubscriber can be replaced by another
+- **I** (Interface Segregation): Simple interface - just implement `execute`
+- **D** (Dependency Inversion): Dependencies injected via constructor
+
+## Code Rules
+
+1. **The execute method should be short** (~20 lines max)
+   - If it grows, split into multiple FlowSubscribers, each flow should have one responsibility;
+
+2. **Each FlowSubscriber should have one responsibility**
+   - Validation → ValidateInputFlowSubscriber
+   - Transformation → TransformDataFlowSubscriber
+   - Persistence → SaveResultFlowSubscriber
+   - Notification → SendEmailFlowSubscriber
+
+3. **Use flow_context to pass data between flows**
+   ```ruby
+   # First flow
+   flow_context[:user] = User.find(id)
+   
+   # Next flow can access
+   user = flow_context[:user]
+   ```
+
+4. **Inject dependencies via constructor**
+   ```ruby
+   class FindUserFlowSubscriber < Flows::SimpleFlowSubscriber
+     def initialize(repository:)
+       @repository = repository
+       super()
+     end
+
+     def execute(flow_context)
+       flow_context[:user] = @repository.find(flow_context[:user_id])
+     end
+   end
+   ```
+
+## File Structure
+
+```
+lib/
+├── flow_subscribers.rb              # Main entry point
+├── flow_subscribers/
+│   └── version.rb                   # Gem version
+├── flow_subscriber/
+│   ├── simple_flow_subscriber.rb    # Base class
+│   ├── simple_catch_flow_subscriber.rb  # With try/catch
+│   └── complete_flow_subscriber.rb  # Advanced version
+└── flow_controller/
+    ├── simple_flow_controller.rb    # Simple controller
+    └── complete_flow_controller.rb  # Advanced controller
+```
+
+## Internal Methods (DO NOT Override)
+
+- `run(flow_context)` - Called by controller, handles internal logic
+- `validate_flows!` - Validates flow array
+
+## Methods to Implement
+
+| Class | Method | Description |
+|-------|--------|-------------|
+| SimpleFlowSubscriber | `execute(flow_context)` | Main business logic |
+| SimpleCatchFlowSubscriber | `execute(flow_context)` | Main business logic |
+| SimpleCatchFlowSubscriber | `catch(exception, flow_context)` | Exception handler |
+
+## Example: Create Account Flow
+
+```ruby
+# Controller
+class CreateAccountController < Flows::SimpleFlowController
+  def initialize
+    super([
+      ValidateAccountFlowSubscriber.new,
+      CreateAccountFlowSubscriber.new,
+      SendWelcomeEmailFlowSubscriber.new
+    ], {})
+  end
+end
+
+# Subscribers
+class ValidateAccountFlowSubscriber < Flows::SimpleFlowSubscriber
+  def execute(flow_context)
+    raise "Email is required" unless flow_context[:email]
+  end
+end
+
+class CreateAccountFlowSubscriber < Flows::SimpleCatchFlowSubscriber
+  def execute(flow_context)
+    account = Account.create!(email: flow_context[:email])
+    flow_context[:account] = account
+  end
+
+  def catch(exception, flow_context)
+    flow_context[:error] = exception.message
+  end
+end
+
+class SendWelcomeEmailFlowSubscriber < Flows::SimpleFlowSubscriber
+  def execute(flow_context)
+    AccountMailer.welcome(flow_context[:account]).deliver_later
+  end
+end
+
+# Usage
+result = CreateAccountController.new.execute
+```
+
+## Language
+
+- All code comments should be in **English**
+- Variable and method names in **English**
+

@@ -1,5 +1,5 @@
 module Flows
-  class SimpleFlow
+  class SimpleFlowSubscriber
     
     attr_accessor :flow_context
 
@@ -7,6 +7,12 @@ module Flows
       @flow_context = flow_context
     end
 
+    # Método chamado pelo controller - não sobrescrever
+    def run(flow_context)
+      execute(flow_context)
+    end
+
+    # Método que o desenvolvedor deve implementar
     def execute(flow_context)
       raise NotImplementedError, "#{self.class} must implement the execute method"
     end

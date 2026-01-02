@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    flow_subscribers (0.0.2)
+    flow_subscribers (0.0.3)
 
 GEM
   remote: https://rubygems.org/

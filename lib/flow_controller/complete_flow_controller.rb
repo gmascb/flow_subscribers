@@ -17,28 +17,43 @@ module Flows
     end
 
     def execute_flows
-      result = nil
-      
       @flows.each do |flow|
-        puts "Starting the CompleteFlow: #{flow.to_s}"
+        flow.flow_context["#{flow.to_s}_can_execute?".to_sym] = flow.can_execute?(flow.flow_context)
+      end
 
-        puts "Executing can_execute? #{flow.to_s}"
-        if flow.can_execute?(self.flow_context)
-          
-          puts "Executing valid? #{flow.to_s}"
-          flow.valid?(self.flow_context)
-          
-          puts "Executing prepare #{flow.to_s}"
-          if flow.prepare(self.flow_context)
-            puts "Executing save #{flow.to_s}"
-            flow.save(self.flow_context)
+      @flows.each do |flow|
+        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
+          begin
+            flow.valid?(flow.flow_context)
+          rescue Exception => e
+            flow.flow_context["#{flow.to_s}_validation_error_message".to_sym] = e.message
+            raise CompleteFlowValidationException(e.message)
           end
         end
       end
 
+      # prepare the flows
       @flows.each do |flow|
-        puts "Executing dispose #{flow.to_s}"
-        flow.dispose(self.flow_context)
+        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
+          puts "Executing prepare #{flow.to_s}"
+          flow.prepare(flow.flow_context)
+        end
+      end
+
+      # save the flows
+      @flows.each do |flow|
+        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
+          puts "Executing save #{flow.to_s}"
+          flow.save(flow.flow_context)
+        end
+      end
+
+      # dispose the flows
+      @flows.each do |flow|
+        if flow.flow_context["#{flow.to_s}_can_execute?".to_sym] == true
+          puts "Executing dispose #{flow.to_s}"
+          flow.dispose(flow.flow_context)
+        end
       end
 
       @flow_context

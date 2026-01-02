@@ -5,34 +5,37 @@ module Flows
   
     # A place to validate if this flow can be executed
     # Needs to return a boolean
-    def can_execute?(obj,flow_context)
-      puts "Can execute? #{obj.to_s}"
-      self.flow_context = flow_context
+    def can_execute?(flow_context)
+      puts "Can execute? #{self.to_s}"
     end
   
     # A place to validate things
     # Time to throw some exceptions from validations
-    def valid?(obj, flow_context)
-      puts "Validating #{obj.to_s}"
-      self.flow_context = flow_context
+    def valid?(flow_context)
+      puts "Validating #{self.to_s}"
     end
   
     # A place to do things
-    def prepare(obj, flow_context)
-      puts "Preparing #{obj.to_s}"
-      self.flow_context = flow_context
+    def prepare(flow_context) 
+      puts "Preparing #{self.to_s}"
     end
   
     # A place to save your data objects
-    def save(obj, flow_context)
-      puts "Saving #{obj.to_s}"
-      self.flow_subscriber_context = flow_context
+    def save(flow_context)
+      puts "Saving #{self.to_s}"
     end
   
     # A place to finish things
-    def dispose(obj, flow_context)
-      puts "Disposing #{obj.to_s}"
-      self.flow_subscriber_context = flow_context
+    def dispose(flow_context)
+      puts "Disposing #{self.to_s}"
+    end
+
+    def name
+      self.class.name
+    end
+
+    def to_s
+      self.name
     end
   end  
 end

@@ -13,13 +13,12 @@ module Flows
     end
 
     def execute_flows
-      result = nil
       @flows.each do |flow|
         puts "Starting the SimpleFlow: #{flow.to_s}"
-        result = flow.execute(@flow_context)
+        flow.run(@flow_context)
         puts "Finished the SimpleFlow: #{flow.to_s}"
       end
-      [result, @flow_context]
+      @flow_context
     end
 
     def validate_flows!
