@@ -18,7 +18,6 @@ This is a Ruby gem that implements a **Flow Pattern** for organizing backend cod
 ┌─────────────────────────────────────────────────────────────────┐
 │                     FlowSubscriber                              │
 │  - Each subscriber has a single responsibility (SRP)            │
-│  - Can call other FlowControllers internally (composition)      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

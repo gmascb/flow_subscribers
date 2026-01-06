@@ -40,7 +40,6 @@ $ gem install flow_subscribers
 ┌─────────────────────────────────────────────────────────────────┐
 │                     FlowSubscriber                              │
 │  - Each subscriber has a single responsibility (SRP)            │
-│  - Can call other FlowControllers internally (composition)      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
