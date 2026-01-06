@@ -134,16 +134,16 @@ $ gem install flow_subscribers
 │  ┌───────────────────────────────────────────────────────────────────────┐   │
 │  │                                                                       │   │
 │  │   PHASE 1: can_execute? (Determines which flows will execute)         │   │
-│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │   │
-│  │   │ Subscriber A │  │ Subscriber B │  │ Subscriber C │               │   │
-│  │   │can_execute?()│  │can_execute?()│  │can_execute?()│               │   │
-│  │   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘               │   │
+│  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                │   │
+│  │   │ Subscriber A │  │ Subscriber B │  │ Subscriber C │                │   │
+│  │   │can_execute?()│  │can_execute?()│  │can_execute?()│                │   │
+│  │   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                │   │
 │  │          │ true            │ true            │ false                  │   │
 │  │          ▼                 ▼                 ✗ (skipped)              │   │
 │  │                                                                       │   │
 │  │   PHASE 2: valid? (Validates ALL executable flows)                    │   │
 │  │   ┌──────────────┐  ┌──────────────┐                                  │   │
-│  │   │ Subscriber A │  │ Subscriber B │   If exception ──► STOP ALL     │   │
+│  │   │ Subscriber A │  │ Subscriber B │   If exception ──► STOP ALL      │   │
 │  │   │   valid?()   │  │   valid?()   │                                  │   │
 │  │   └──────┬───────┘  └──────┬───────┘                                  │   │
 │  │          ▼                 ▼                                          │   │
@@ -647,17 +647,39 @@ user = flow_context[:user]
 
 ### 4. Inject dependencies via constructor
 
+Use **Dependency Injection (DI)** to achieve **Inversion of Control (IoC)**:
+
+| Concept | What | Why |
+|---------|------|-----|
+| **IoC** | Principle: hand over control of dependency creation | Loose coupling, modular code |
+| **DI** | Pattern: inject dependencies from outside | Testability (easy mocking), flexibility |
+
 ```ruby
+# ❌ Without DI - hard to test, tightly coupled
 class FindUserFlowSubscriber < Flows::SimpleFlowSubscriber
-  def initialize(repository:)
-    @repository = repository
+  def execute(flow_context)
+    client = SoapClient.new  # Creates its own dependency
+    flow_context[:user] = client.find_user(flow_context[:user_id])
+  end
+end
+
+# ✅ With DI - testable, loosely coupled
+class FindUserFlowSubscriber < Flows::SimpleFlowSubscriber
+  def initialize(soap_client:)
+    @soap_client = soap_client  # Dependency injected via constructor
     super()
   end
 
   def execute(flow_context)
-    flow_context[:user] = @repository.find(flow_context[:user_id])
+    flow_context[:user] = @soap_client.find_user(flow_context[:user_id])
   end
 end
+
+# Usage
+FindUserFlowSubscriber.new(soap_client: SoapClient.new)
+
+# Testing - just inject a mock
+FindUserFlowSubscriber.new(soap_client: mock_client)
 ```
 
 ---
