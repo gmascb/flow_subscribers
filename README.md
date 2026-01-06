@@ -28,13 +28,13 @@ $ gem install flow_subscribers
 
 ## Architecture
 
-O **FlowSubscribers** implementa dois padrões de fluxo para organizar lógica de negócio:
+**FlowSubscribers** implements two flow patterns to organize business logic:
 
-### Visão Geral das Classes
+### Class Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              MÓDULO Flows                                   │
+│                              MODULE Flows                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐ │
@@ -69,9 +69,9 @@ O **FlowSubscribers** implementa dois padrões de fluxo para organizar lógica d
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Fluxo de Comunicação - Simple Flow
+### Communication Flow - Simple Flow
 
-O **SimpleFlow** executa cada subscriber sequencialmente. Ideal para fluxos simples onde cada etapa depende da anterior.
+**SimpleFlow** executes each subscriber sequentially. Ideal for simple flows where each step depends on the previous one.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -79,7 +79,7 @@ O **SimpleFlow** executa cada subscriber sequencialmente. Ideal para fluxos simp
 │                      ┌─────────┘                                             │
 │                      ▼                                                       │
 │  ┌───────────────────────────────────────────────────────────────────────┐   │
-│  │  LOOP: Para cada flow em @flows                                       │   │
+│  │  LOOP: For each flow in @flows                                        │   │
 │  │                                                                       │   │
 │  │    ┌─────────────────┐     ┌─────────────────┐     ┌──────────────┐   │   │
 │  │    │  Subscriber A   │ ──► │  Subscriber B   │ ──► │ Subscriber C │   │   │
@@ -88,15 +88,15 @@ O **SimpleFlow** executa cada subscriber sequencialmente. Ideal para fluxos simp
 │  │    │ execute(context)│     │ execute(context)│     │execute(ctx)  │   │   │
 │  │    └─────────────────┘     └─────────────────┘     └──────────────┘   │   │
 │  │                                                                       │   │
-│  │    flow_context é passado e modificado em cada etapa                  │   │
+│  │    flow_context is passed and modified at each step                   │   │
 │  │    ──────────────────────────────────────────────────────────────►    │   │
 │  └───────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
-│  Retorna: flow_context (com todas as modificações)                           │
+│  Returns: flow_context (with all modifications)                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**SimpleCatchFlowSubscriber** adiciona tratamento de exceções:
+**SimpleCatchFlowSubscriber** adds exception handling:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -107,7 +107,7 @@ O **SimpleFlow** executa cada subscriber sequencialmente. Ideal para fluxos simp
 │         ▼                                                   │
 │   ┌─────────────────────┐                                   │
 │   │  try                │                                   │
-│   │    execute(context) │────► Sucesso ────► return context │
+│   │    execute(context) │────► Success ────► return context │
 │   └─────────┬───────────┘                                   │
 │             │                                               │
 │        Exception?                                           │
@@ -123,9 +123,9 @@ O **SimpleFlow** executa cada subscriber sequencialmente. Ideal para fluxos simp
 
 ---
 
-### Fluxo de Comunicação - Complete Flow
+### Communication Flow - Complete Flow
 
-O **CompleteFlow** executa em **5 fases distintas**, onde cada fase é executada para TODOS os subscribers antes de avançar para a próxima. Ideal para lógica de negócio complexa com validações, preparações e rollback.
+**CompleteFlow** executes in **5 distinct phases**, where each phase is executed for ALL subscribers before moving to the next. Ideal for complex business logic with validations, preparations, and rollback.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -133,36 +133,36 @@ O **CompleteFlow** executa em **5 fases distintas**, onde cada fase é executada
 │                                                                              │
 │  ┌───────────────────────────────────────────────────────────────────────┐   │
 │  │                                                                       │   │
-│  │   FASE 1: can_execute? (Determina quais flows vão executar)           │   │
+│  │   PHASE 1: can_execute? (Determines which flows will execute)         │   │
 │  │   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐               │   │
 │  │   │ Subscriber A │  │ Subscriber B │  │ Subscriber C │               │   │
 │  │   │can_execute?()│  │can_execute?()│  │can_execute?()│               │   │
 │  │   └──────┬───────┘  └──────┬───────┘  └──────┬───────┘               │   │
 │  │          │ true            │ true            │ false                  │   │
-│  │          ▼                 ▼                 ✗ (ignorado)             │   │
+│  │          ▼                 ▼                 ✗ (skipped)              │   │
 │  │                                                                       │   │
-│  │   FASE 2: valid? (Valida TODOS os executáveis)                        │   │
+│  │   PHASE 2: valid? (Validates ALL executable flows)                    │   │
 │  │   ┌──────────────┐  ┌──────────────┐                                  │   │
-│  │   │ Subscriber A │  │ Subscriber B │   Se exception ──► PARA TUDO    │   │
+│  │   │ Subscriber A │  │ Subscriber B │   If exception ──► STOP ALL     │   │
 │  │   │   valid?()   │  │   valid?()   │                                  │   │
 │  │   └──────┬───────┘  └──────┬───────┘                                  │   │
 │  │          ▼                 ▼                                          │   │
 │  │                                                                       │   │
-│  │   FASE 3: prepare (Prepara dados para todos)                          │   │
+│  │   PHASE 3: prepare (Prepares data for all)                            │   │
 │  │   ┌──────────────┐  ┌──────────────┐                                  │   │
 │  │   │ Subscriber A │  │ Subscriber B │                                  │   │
 │  │   │  prepare()   │  │  prepare()   │                                  │   │
 │  │   └──────┬───────┘  └──────┬───────┘                                  │   │
 │  │          ▼                 ▼                                          │   │
 │  │                                                                       │   │
-│  │   FASE 4: save (Persiste dados para todos)                            │   │
+│  │   PHASE 4: save (Persists data for all)                               │   │
 │  │   ┌──────────────┐  ┌──────────────┐                                  │   │
 │  │   │ Subscriber A │  │ Subscriber B │                                  │   │
 │  │   │    save()    │  │    save()    │                                  │   │
 │  │   └──────┬───────┘  └──────┬───────┘                                  │   │
 │  │          ▼                 ▼                                          │   │
 │  │                                                                       │   │
-│  │   FASE 5: dispose (Finaliza/Notifica todos)                           │   │
+│  │   PHASE 5: dispose (Finalize/Notify all)                              │   │
 │  │   ┌──────────────┐  ┌──────────────┐                                  │   │
 │  │   │ Subscriber A │  │ Subscriber B │                                  │   │
 │  │   │  dispose()   │  │  dispose()   │                                  │   │
@@ -170,12 +170,12 @@ O **CompleteFlow** executa em **5 fases distintas**, onde cada fase é executada
 │  │                                                                       │   │
 │  └───────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
-│  Retorna: flow_context (com resultados de todas as fases)                    │
+│  Returns: flow_context (with results from all phases)                        │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 
-### Comparação: Simple vs Complete Flow
+### Comparison: Simple vs Complete Flow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -183,43 +183,43 @@ O **CompleteFlow** executa em **5 fases distintas**, onde cada fase é executada
 │   SIMPLE FLOW                        COMPLETE FLOW                          │
 │   ───────────                        ─────────────                          │
 │                                                                             │
-│   Subscriber A                       FASE 1: can_execute?                   │
+│   Subscriber A                       PHASE 1: can_execute?                  │
 │       │ execute()                        A ──► B ──► C (C returned false)   │
 │       ▼                                                                     │
-│   Subscriber B                       FASE 2: valid?                         │
+│   Subscriber B                       PHASE 2: valid?                        │
 │       │ execute()                        A ──► B     C doesn't execute any  │
 │       ▼                                                 other step          │
-│   Subscriber C                       FASE 3: prepare                        │
+│   Subscriber C                       PHASE 3: prepare                       │
 │       │ execute()                        A ──► B                            │
 │       ▼                                                                     │
-│   FIM                                FASE 4: save                           │
+│   END                                PHASE 4: save                          │
 │                                          A ──► B                            │
 │                                                                             │
-│   Execução:                          FASE 5: dispose                        │
-│   SEQUENCIAL por subscriber              A ──► B                            │
-│   A completo ► B completo ► C                                               │
-│                                      Execução:                              │
-│   Use quando:                        TODAS AS FASES para todos              │
-│   - Fluxos simples                   antes de avançar                       │
-│   - Cada etapa depende da anterior                                          │
-│   - Tratamento de erro individual    Use quando:                            │
-│                                      - Validações complexas                 │
-│                                      - Rollback transacional                │
-│                                      - Múltiplos subscribers                │
-│                                        interdependentes                     │
+│   Execution:                         PHASE 5: dispose                       │
+│   SEQUENTIAL by subscriber               A ──► B                            │
+│   A complete ► B complete ► C                                               │
+│                                      Execution:                             │
+│   Use when:                          ALL PHASES for everyone                │
+│   - Simple flows                     before moving forward                  │
+│   - Each step depends on previous                                           │
+│   - Individual error handling        Use when:                              │
+│                                      - Complex validations                  │
+│                                      - Transactional rollback               │
+│                                      - Multiple interdependent              │
+│                                        subscribers                          │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Fluxo do flow_context
+### flow_context Flow
 
-O `flow_context` é um Hash compartilhado que flui por todos os subscribers:
+The `flow_context` is a shared Hash that flows through all subscribers:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
 │                          flow_context                                      │
 │                                                                            │
-│   Entrada:  { user_id: 1, amount: 100 }                                    │
+│   Input:  { user_id: 1, amount: 100 }                                      │
 │                    │                                                       │
 │                    ▼                                                       │
 │   ┌─────────────────────────────────────────────────────────────────────┐  │
@@ -249,7 +249,7 @@ O `flow_context` é um Hash compartilhado que flui por todos os subscribers:
 │   └─────────────────────────────────────────────────────────────────────┘  │
 │                    │                                                       │
 │                    ▼                                                       │
-│   Saída:  { user_id: 1, amount: 100, sender: <User>, ..., receipt: true }  │
+│   Output:  { user_id: 1, amount: 100, sender: <User>, ..., receipt: true } │
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
