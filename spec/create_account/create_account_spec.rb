@@ -20,17 +20,19 @@ end
 
 class CreateAccountController < Flows::SimpleFlowController
   def initialize
-    super([
-      CreateAccountSimpleFlowSubscriber.new
-    ], {})
+    super(
+      flows: [CreateAccountSimpleFlowSubscriber.new],
+      flow_context: {}
+    )
   end
 end
 
 class CreateAccountWithErrorController < Flows::SimpleFlowController
   def initialize
-    super([
-      CreateAccountCatchFlowSubscriber.new
-    ], {})
+    super(
+      flows: [CreateAccountCatchFlowSubscriber.new],
+      flow_context: {}
+    )
   end
 end
 

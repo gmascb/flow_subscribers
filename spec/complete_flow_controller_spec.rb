@@ -7,11 +7,11 @@ RSpec.describe Flows::CompleteFlowController do
 
   it "executes all phases in order" do
     ctrl = Flows::CompleteFlowController.new(
-      [
+      flows: [
         TestCompleteFlowSubscriber.new, 
         TestCompleteFlowSubscriber.new
       ], 
-      { message: "My text", execution_order: [] }
+      flow_context: { message: "My text", execution_order: [] }
     )
 
     result = ctrl.execute
@@ -29,11 +29,11 @@ RSpec.describe Flows::CompleteFlowController do
 
   it "stops execution when validation fails" do
     ctrl = Flows::CompleteFlowController.new(
-      [
+      flows: [
         TestCompleteFlowSubscriber.new,
         FailingValidationFlowSubscriber.new
       ],
-      { execution_order: [] }
+      flow_context: { execution_order: [] }
     )
 
     expect { ctrl.execute }.to raise_error("Validation failed!")

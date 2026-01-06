@@ -7,11 +7,11 @@ RSpec.describe Flows::SimpleFlowController do
 
   it "calling controller execute" do
     ctrl = Flows::SimpleFlowController.new(
-      [
+      flows: [
         TestSimpleFlowSubscriber.new, 
         TestSimpleFlowSubscriber.new
       ],
-      { message: "My text" }
+      flow_context: { message: "My text" }
     )
     
     result = ctrl.execute

@@ -5,9 +5,11 @@ module Flows
     # Overrides run to add try/catch around execute
     def run(flow_context)
       self.execute(flow_context)
+      flow_context
     rescue Exception => e
       puts "Exception: #{e.message}"
       self.catch(e, flow_context)
+      flow_context
     end
 
     # Method that the developer must implement

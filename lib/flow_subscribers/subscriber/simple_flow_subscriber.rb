@@ -11,6 +11,7 @@ module Flows
     # Method called by the controller - DO NOT override
     def run(flow_context)
       execute(flow_context)
+      flow_context
     end
 
     # Method that the developer must implement

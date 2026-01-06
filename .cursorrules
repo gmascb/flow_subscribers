@@ -11,77 +11,40 @@ This is a Ruby gem that implements a **Flow Pattern** for organizing backend cod
 │                      FlowController                             │
 │  - Orchestrates the execution of multiple FlowSubscribers       │
 │  - Calls flow.run(context) for each subscriber in sequence      │
+│  - Can also call other FlowControllers (nested flows)           │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     FlowSubscriber                              │
-│  - Each subscriber has a single responsibility (SRP)           │
-│  - Developer implements only the `execute(flow_context)` method │
-│  - The run() method is internal and should NOT be overridden    │
+│  - Each subscriber has a single responsibility (SRP)            │
+│  - Can call other FlowControllers internally (composition)      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-# Simple Flow (Recommended for most cases)
-
-## SimpleFlowSubscriber
-
-Base class for flow subscribers. Developer must implement only `execute(flow_context)`.
+### Example of SimpleFlowController
 
 ```ruby
-class MyFlowSubscriber < Flows::SimpleFlowSubscriber
-  def execute(flow_context)
-    # Your business logic goes here
+class CreateAccountFlowController < Flows::SimpleFlowController
+  def initialize(flow_context:, transactional: false)
+    super(
+      flows: [
+        ValidateInputFlowSubscriber.new,
+        CreateAccountFlowSubscriber.new,
+        SendWelcomeEmailFlowSubscriber.new
+      ],
+      flow_context: flow_context,
+      transactional: transactional
+    )
   end
 end
 ```
 
-## SimpleCatchFlowSubscriber
-
-Flow with automatic exception handling. Developer implements `execute` and `catch`.
+### SimpleFlowSubscribers
 
 ```ruby
-class MyFlowWithErrorHandling < Flows::SimpleCatchFlowSubscriber
-  def execute(flow_context)
-    # Your business logic goes here that might raise an exception
-    result = external_api_call()
-    flow_context[:api_result] = result
-  end
-
-  def catch(exception, flow_context)
-    # Handle the exception
-    flow_context[:error] = exception.message
-    flow_context[:success] = false
-  end
-end
-```
-
-## SimpleFlowController
-
-Orchestrates the execution of multiple flows in sequence.
-
-**Execution Order:**
-```
-Flow1.execute → Flow2.execute → Flow3.execute → ... → FlowN.execute
-```
-
-### Example: Simple Flow Usage
-
-```ruby
-# Controller
-class CreateAccountController < Flows::SimpleFlowController
-  def initialize(flow_context: {})
-    super([
-      ValidateInputFlowSubscriber.new,
-      CreateAccountFlowSubscriber.new,
-      SendWelcomeEmailFlowSubscriber.new
-    ], flow_context)
-  end
-end
-
-# Subscribers
 class ValidateInputFlowSubscriber < Flows::SimpleFlowSubscriber
   def execute(flow_context)
     raise "Email is required" unless flow_context[:email]
@@ -111,139 +74,112 @@ class SendWelcomeEmailFlowSubscriber < Flows::SimpleFlowSubscriber
     flow_context[:email_sent] = true
   end
 end
+```
 
-# Usage
-result = CreateAccountController.new(flow_context: { email: "john.doe@example.com", name: "John Doe" }).execute
+### Usage in Rails API Controller
+
+```ruby
+class AccountsController < ApplicationController
+  def create
+    result = CreateAccountFlowController.new(
+      flow_context: {
+        email: params[:email],
+        name: params[:name]
+      },
+      transactional: true
+    ).execute
+
+    if result[:error]
+      render json: { error: result[:error] }, status: :unprocessable_entity
+    else
+      render json: { account: result[:account] }, status: :created
+    end
+  end
+end
 ```
 
 ---
 
 # Complete Flow (For complex business logic)
 
-## CompleteFlowSubscriber
-
-Advanced flow with multiple lifecycle methods for complex business logic.
-
-```ruby
-class MyCompleteFlow < Flows::CompleteFlowSubscriber
-  def can_execute?(flow_context)
-    # Return true/false to determine if this flow should run
-    flow_context[:user].present?
-  end
-
-  def valid?(flow_context)
-    # Validate data - raise exception if invalid
-    raise "Invalid email" unless flow_context[:email].include?("@")
-  end
-
-  def prepare(flow_context)
-    # Prepare data, calculations, transformations
-    flow_context[:prepared_data] = transform(flow_context[:raw_data])
-  end
-
-  def save(flow_context)
-    # Persist data, HTTP requests, database operations
-    Record.create!(flow_context[:prepared_data])
-  end
-
-  def dispose(flow_context)
-    # Cleanup, close connections, send notifications, queue messages
-    NotificationService.notify(flow_context[:user])
-  end
-end
-```
-
-## CompleteFlowController
-
-Orchestrates multiple CompleteFlowSubscribers with **phase-based execution**.
-
-### Execution Order (IMPORTANT!)
-
 The controller executes **each phase for ALL flows** before moving to the next phase:
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  Phase 1: can_execute?                                              │
-│  Flow1.can_execute? → Flow2.can_execute? → Flow3.can_execute?       │
-├─────────────────────────────────────────────────────────────────────┤
-│  Phase 2: valid?                                                    │
-│  Flow1.valid? → Flow2.valid? → Flow3.valid?                         │
-│  ⚠️ If any validation fails, execution STOPS before save!          │
-├─────────────────────────────────────────────────────────────────────┤
-│  Phase 3: prepare                                                   │
-│  Flow1.prepare → Flow2.prepare → Flow3.prepare                      │
-├─────────────────────────────────────────────────────────────────────┤
-│  Phase 4: save                                                      │
-│  Flow1.save → Flow2.save → Flow3.save                               │
-│  ✅ Only executed if ALL validations passed!                        │
-├─────────────────────────────────────────────────────────────────────┤
-│  Phase 5: dispose                                                   │
-│  Flow1.dispose → Flow2.dispose → Flow3.dispose                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
 
-### Why Phase-Based Execution?
-
-This ensures **data consistency**:
-- If Flow3 validation fails, Flow1 and Flow2 saves are NOT executed
-- All validations pass before any data is persisted
-- Rollback is not needed because nothing was saved yet
-
-### Example: Complete Flow Usage
+### Example: CompleteFlowController
 
 ```ruby
-# Controller
-class ProcessPaymentController < Flows::CompleteFlowController
-  def initialize(flow_context: {})
-    super([
-      ValidatePaymentFlowSubscriber.new,
-      CheckBalanceFlowSubscriber.new,
-      ProcessTransactionFlowSubscriber.new,
-      SendReceiptFlowSubscriber.new
-    ], flow_context)
+class BankTransferFlowController < Flows::CompleteFlowController
+  def initialize(flow_context:, transactional: false)
+    super(
+      flows: [
+        ValidateBalanceFlowSubscriber.new,
+        ExecuteTransferFlowSubscriber.new,
+        SendSenderReceiptFlowSubscriber.new,
+        SendReceiverReceiptFlowSubscriber.new
+      ],
+      flow_context: flow_context,
+      transactional: transactional
+    )
   end
 end
+```
 
-# Subscribers
-class ValidatePaymentFlowSubscriber < Flows::CompleteFlowSubscriber
+### Flow Execution Order
+
+```
+Phase 1: can_execute?
+├── ValidateBalanceFlowSubscriber.can_execute?     ✓ (user_id, amount present)
+├── ExecuteTransferFlowSubscriber.can_execute?     ✓ (sender, bank, agency, number present)
+├── SendSenderReceiptFlowSubscriber.can_execute?   ✓ (transfer_id, sender present)
+└── SendReceiverReceiptFlowSubscriber.can_execute? ✓ (transfer_id, receiver present)
+
+Phase 2: valid?
+├── ValidateBalanceFlowSubscriber.valid?     → Validates balance, loads sender
+├── ExecuteTransferFlowSubscriber.valid?     → Validates destination, loads receiver
+├── SendSenderReceiptFlowSubscriber.valid?   → Validates transfer_id and sender
+└── SendReceiverReceiptFlowSubscriber.valid? → Validates transfer_id and receiver
+
+Phase 3: prepare
+├── ValidateBalanceFlowSubscriber.prepare     → Calculates new balance
+├── ExecuteTransferFlowSubscriber.prepare     → Prepares transfer data
+├── SendSenderReceiptFlowSubscriber.prepare   → Prepares sender receipt
+└── SendReceiverReceiptFlowSubscriber.prepare → Prepares receiver receipt
+
+Phase 4: save (only if ALL validations passed!)
+├── ValidateBalanceFlowSubscriber.save        → Nothing
+├── ExecuteTransferFlowSubscriber.save        → Updates balances, creates transfer
+├── SendSenderReceiptFlowSubscriber.save      → Creates sender receipt
+└── SendReceiverReceiptFlowSubscriber.save    → Creates receiver receipt
+
+Phase 5: dispose
+├── ValidateBalanceFlowSubscriber.dispose        → Nothing
+├── ExecuteTransferFlowSubscriber.dispose        → Logs transfer
+├── SendSenderReceiptFlowSubscriber.dispose      → Sends email to sender
+└── SendReceiverReceiptFlowSubscriber.dispose    → Sends email + notification to receiver
+```
+
+### FlowSubscriber 1: Validate Balance
+
+```ruby
+class ValidateBalanceFlowSubscriber < Flows::CompleteFlowSubscriber
   def can_execute?(flow_context)
-    flow_context[:amount].present?
+    flow_context[:user_id].present? && flow_context[:amount].present?
   end
 
   def valid?(flow_context)
-    raise "Amount must be positive" if flow_context[:amount] <= 0
-    raise "Invalid card" unless flow_context[:card].valid?
+    raise "user_id is required" unless flow_context[:user_id].present?
+    raise "amount is required" unless flow_context[:amount].present?
+    raise "amount must be positive" if flow_context[:amount] <= 0
+
+    sender = User.find(flow_context[:user_id])
+    raise "Insufficient balance" if sender.balance < flow_context[:amount]
+
+    flow_context[:sender] = sender
+    flow_context[:sender_balance_before] = sender.balance
   end
 
   def prepare(flow_context)
-    flow_context[:payment_data] = {
-      amount: flow_context[:amount],
-      card_token: flow_context[:card].tokenize
-    }
-  end
-
-  def save(flow_context)
-    # Nothing to save in this flow
-  end
-
-  def dispose(flow_context)
-    # Nothing to dispose
-  end
-end
-
-class CheckBalanceFlowSubscriber < Flows::CompleteFlowSubscriber
-  def can_execute?(flow_context)
-    true
-  end
-
-  def valid?(flow_context)
-    balance = BankService.check_balance(flow_context[:card])
-    raise "Insufficient funds" if balance < flow_context[:amount]
-    flow_context[:balance] = balance
-  end
-
-  def prepare(flow_context)
-    flow_context[:new_balance] = flow_context[:balance] - flow_context[:amount]
+    flow_context[:sender_balance_after] = flow_context[:sender_balance_before] - flow_context[:amount]
   end
 
   def save(flow_context)
@@ -254,59 +190,188 @@ class CheckBalanceFlowSubscriber < Flows::CompleteFlowSubscriber
     # Nothing to dispose
   end
 end
-
-class ProcessTransactionFlowSubscriber < Flows::CompleteFlowSubscriber
-  def can_execute?(flow_context)
-    true
-  end
-
-  def valid?(flow_context)
-    # Already validated in previous flows
-  end
-
-  def prepare(flow_context)
-    flow_context[:transaction] = Transaction.new(flow_context[:payment_data])
-  end
-
-  def save(flow_context)
-    # This only runs if ALL validations passed!
-    flow_context[:transaction].save!
-    flow_context[:transaction_id] = flow_context[:transaction].id
-  end
-
-  def dispose(flow_context)
-    # Nothing to dispose
-  end
-end
-
-class SendReceiptFlowSubscriber < Flows::CompleteFlowSubscriber
-  def can_execute?(flow_context)
-    flow_context[:transaction_id].present?
-  end
-
-  def valid?(flow_context)
-    # No validation needed
-  end
-
-  def prepare(flow_context)
-    # Nothing to prepare
-  end
-
-  def save(flow_context)
-    # Nothing to save
-  end
-
-  def dispose(flow_context)
-    # Send receipt email after everything is done
-    ReceiptMailer.send(flow_context[:transaction_id]).deliver_later
-  end
-end
-
-# Usage
-result = ProcessPaymentController.new(
-  flow_context: { amount: 100.00, card: card_object }
-).execute
 ```
+
+### FlowSubscriber 2: Execute Transfer
+
+```ruby
+class ExecuteTransferFlowSubscriber < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    flow_context[:sender].present? &&
+      flow_context[:bank].present? &&
+      flow_context[:agency].present? &&
+      flow_context[:number].present?
+  end
+
+  def valid?(flow_context)
+    destination_account = BankAccount.find_by(
+      bank: flow_context[:bank],
+      agency: flow_context[:agency],
+      number: flow_context[:number]
+    )
+    raise "Destination account not found" unless destination_account
+
+    flow_context[:destination_account] = destination_account
+    flow_context[:receiver] = destination_account.user
+  end
+
+  def prepare(flow_context)
+    flow_context[:transfer_data] = {
+      sender_id: flow_context[:sender].id,
+      receiver_id: flow_context[:receiver].id,
+      destination_bank: flow_context[:bank],
+      destination_agency: flow_context[:agency],
+      destination_number: flow_context[:number],
+      amount: flow_context[:amount],
+      status: :pending
+    }
+  end
+
+  def save(flow_context)
+    flow_context[:sender].update!(balance: flow_context[:sender_balance_after])
+
+    new_receiver_balance = flow_context[:receiver].balance + flow_context[:amount]
+    flow_context[:receiver].update!(balance: new_receiver_balance)
+
+    transfer = Transfer.create!(flow_context[:transfer_data].merge(status: :completed))
+    flow_context[:transfer] = transfer
+    flow_context[:transfer_id] = transfer.id
+  end
+
+  def dispose(flow_context)
+    Rails.logger.info("Transfer ##{flow_context[:transfer_id]} completed")
+  end
+end
+```
+
+### FlowSubscriber 3: Send Receipt to Sender
+
+```ruby
+class SendSenderReceiptFlowSubscriber < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    flow_context[:transfer_id].present? && flow_context[:sender].present?
+  end
+
+  def valid?(flow_context)
+    raise "transfer_id is required" unless flow_context[:transfer_id].present?
+    raise "sender is required" unless flow_context[:sender].present?
+  end
+
+  def prepare(flow_context)
+    flow_context[:sender_receipt] = {
+      transfer_id: flow_context[:transfer_id],
+      user_id: flow_context[:sender].id,
+      type: :debit,
+      amount: flow_context[:amount],
+      balance_before: flow_context[:sender_balance_before],
+      balance_after: flow_context[:sender_balance_after],
+      destination: "#{flow_context[:bank]}/#{flow_context[:agency]}/#{flow_context[:number]}"
+    }
+  end
+
+  def save(flow_context)
+    receipt = Receipt.create!(flow_context[:sender_receipt])
+    flow_context[:sender_receipt_id] = receipt.id
+  end
+
+  def dispose(flow_context)
+    TransferMailer.sender_receipt(
+      user: flow_context[:sender],
+      transfer: flow_context[:transfer],
+      receipt_id: flow_context[:sender_receipt_id]
+    ).deliver_later
+  end
+end
+```
+
+### FlowSubscriber 4: Send Receipt to Receiver
+
+```ruby
+class SendReceiverReceiptFlowSubscriber < Flows::CompleteFlowSubscriber
+  def can_execute?(flow_context)
+    flow_context[:transfer_id].present? && flow_context[:receiver].present?
+  end
+
+  def valid?(flow_context)
+    raise "transfer_id is required" unless flow_context[:transfer_id].present?
+    raise "receiver is required" unless flow_context[:receiver].present?
+  end
+
+  def prepare(flow_context)
+    flow_context[:receiver_receipt] = {
+      transfer_id: flow_context[:transfer_id],
+      user_id: flow_context[:receiver].id,
+      type: :credit,
+      amount: flow_context[:amount],
+      sender_name: flow_context[:sender].name
+    }
+  end
+
+  def save(flow_context)
+    receipt = Receipt.create!(flow_context[:receiver_receipt])
+    flow_context[:receiver_receipt_id] = receipt.id
+  end
+
+  def dispose(flow_context)
+    TransferMailer.receiver_receipt(
+      user: flow_context[:receiver],
+      transfer: flow_context[:transfer],
+      receipt_id: flow_context[:receiver_receipt_id]
+    ).deliver_later
+
+    NotificationService.notify(
+      flow_context[:receiver].id,
+      "You received #{flow_context[:amount]} from #{flow_context[:sender].name}"
+    )
+  end
+end
+```
+
+### Usage in Rails API Controller
+
+```ruby
+class TransfersController < ApplicationController
+  def create
+    result = BankTransferFlowController.new(
+      flow_context: {
+        user_id: current_user.id,
+        amount: params[:amount].to_f,
+        bank: params[:bank],
+        agency: params[:agency],
+        number: params[:number]
+      },
+      transactional: true
+    ).execute
+
+    if result[:transfer_id]
+      render json: {
+        transfer_id: result[:transfer_id],
+        sender_receipt_id: result[:sender_receipt_id],
+        receiver_receipt_id: result[:receiver_receipt_id]
+      }, status: :created
+    else
+      render json: { error: result[:error] }, status: :unprocessable_entity
+    end
+  end
+end
+```
+
+---
+
+# Transactional Mode
+
+**When `transactional: true` in CompleteFlowController:**
+- All 5 phases are wrapped in a single transaction
+- If validation fails in Phase 2, no saves are executed (no rollback needed)
+- If an error occurs in Phase 4 (save), all previous saves are rolled back
+- Commit only happens after Phase 5 (dispose) completes
+
+## Use Cases for Transactional Mode
+
+- When multiple flows modify the database and you need atomicity
+- When you need "all or nothing" behavior
+- When you want automatic rollback on failure
+- When nested flows all need to succeed or fail together
 
 ---
 
