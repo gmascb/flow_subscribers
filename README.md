@@ -52,9 +52,9 @@ O **FlowSubscribers** implementa dois padrões de fluxo para organizar lógica d
 │  │  ┌───────────────────────┐  │    │  ┌─────────────────────────────┐    │ │
 │  │  │ SimpleFlowSubscriber  │  │    │  │  CompleteFlowSubscriber     │    │ │
 │  │  │                       │  │    │  │                             │    │ │
-│  │  │  + run(context)       │  │    │  │  + can_execute?(context)    │    │ │
-│  │  │  + execute(context)   │  │    │  │  + valid?(context)          │    │ │
-│  │  └───────────┬───────────┘  │    │  │  + prepare(context)         │    │ │
+│  │  │  + execute(context)   │  │    │  │  + can_execute?(context)    │    │ │
+│  │  └───────────┬───────────┘       │  │  + valid?(context)          │    │ │
+│  │              │              │    │  │  + prepare(context)         │    │ │
 │  │              │              │    │  │  + save(context)            │    │ │
 │  │              │ extends      │    │  │  + dispose(context)         │    │ │
 │  │              ▼              │    │  └─────────────────────────────┘    │ │
